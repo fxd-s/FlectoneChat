@@ -1,8 +1,7 @@
 package net.flectone.commands;
 
-import net.flectone.Main;
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FTabCompleter;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
 import net.flectone.utils.ObjectUtil;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -12,27 +11,28 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collections;
 import java.util.List;
 
-public class CommandMe extends FTabCompleter {
+import static net.flectone.managers.FileManager.locale;
 
-    public CommandMe(){
-        super.commandName = "me";
-    }
+public class CommandMe implements FTabCompleter {
 
     @Override
     public boolean onCommand(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
 
-        FCommands fCommand = new FCommands(commandSender, command.getName(), s, strings);
+        FCommand fCommand = new FCommand(commandSender, command.getName(), s, strings);
 
-        if(fCommand.isInsufficientArgs(1)) return true;
+        if (fCommand.isInsufficientArgs(1)
+                || fCommand.isHaveCD()
+                || fCommand.isMuted()) return true;
 
-        if(fCommand.isHaveCD()) return true;
+        if (fCommand.isDisabled()) {
+            fCommand.sendMeMessage("command.you-disabled");
+            return true;
+        }
 
-        if(fCommand.isMuted()) return true;
-
-        String formatString = Main.locale.getString("command.me.message")
+        String formatString = locale.getString("command.me.message")
                 .replace("<player>", fCommand.getSenderName());
 
-        fCommand.sendGlobalMessage(formatString, ObjectUtil.toString(strings));
+        fCommand.sendGlobalMessage(formatString, ObjectUtil.toString(strings), null, true);
 
         return true;
     }
@@ -42,12 +42,18 @@ public class CommandMe extends FTabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
         wordsList.clear();
 
-        if(strings.length == 1){
-            isStartsWith(strings[0], "(message)");
+        if (strings.length == 1) {
+            isTabCompleteMessage(strings[0]);
         }
 
         Collections.sort(wordsList);
 
         return wordsList;
+    }
+
+    @NotNull
+    @Override
+    public String getCommandName() {
+        return "me";
     }
 }

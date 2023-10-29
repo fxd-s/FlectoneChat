@@ -2,6 +2,8 @@ site_name: FlectoneChat Docs
 theme:
   features:
     - content.code.annotate
+    - navigation.expand
+    - navigation.tracking
   logo: assets/logo.png
   favicon: assets/logo.png
   name: material
@@ -10,6 +12,8 @@ theme:
     primary: black
     accent: blue
 plugins:
+  - search
+  - awesome-pages
   - i18n:
       default_language: en
       nav_translations:
@@ -40,6 +44,12 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.superfences
 
+  - toc:
+      permalink: true
+  - pymdownx.escapeall:
+      hardbreak: true
+
 copyright: Copyright &copy; 2023 - 2023 Flectone
 
-extra_css: [css/extra.css]
+extra_css: [ css/extra.css ]
+extra_javascript: [ js/language.js ]

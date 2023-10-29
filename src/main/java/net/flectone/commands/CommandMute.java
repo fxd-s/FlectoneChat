@@ -1,11 +1,12 @@
 package net.flectone.commands;
 
-import net.flectone.Main;
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FPlayer;
-import net.flectone.integrations.voicechats.plasmovoice.FlectonePlasmoVoice;
+import net.flectone.integrations.discordsrv.FDiscordSRV;
+import net.flectone.integrations.voicechats.plasmovoice.FPlasmoVoice;
 import net.flectone.managers.FPlayerManager;
-import net.flectone.custom.FTabCompleter;
+import net.flectone.managers.HookManager;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FPlayer;
 import net.flectone.utils.ObjectUtil;
 import org.apache.commons.lang.StringUtils;
 import org.bukkit.Bukkit;
@@ -18,22 +19,21 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class CommandMute extends FTabCompleter {
+import static net.flectone.managers.FileManager.config;
+import static net.flectone.managers.FileManager.locale;
 
-    public CommandMute(){
-        super.commandName = "mute";
-    }
+public class CommandMute implements FTabCompleter {
 
     @Override
     public boolean onCommand(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
 
-        FCommands fCommand = new FCommands(commandSender, command.getName(), s, strings);
+        FCommand fCommand = new FCommand(commandSender, command.getName(), s, strings);
 
-        if(fCommand.isInsufficientArgs(2)) return true;
+        if (fCommand.isInsufficientArgs(2)) return true;
 
         String stringTime = strings[1];
 
-        if(!fCommand.isStringTime(stringTime) || !StringUtils.isNumeric(stringTime.substring(0, stringTime.length() - 1))){
+        if (!fCommand.isStringTime(stringTime) || !StringUtils.isNumeric(stringTime.substring(0, stringTime.length() - 1))) {
             fCommand.sendUsageMessage();
             return true;
         }
@@ -41,28 +41,33 @@ public class CommandMute extends FTabCompleter {
         String playerName = strings[0];
         FPlayer mutedFPlayer = FPlayerManager.getPlayerFromName(playerName);
 
-        if(mutedFPlayer == null){
+        if (mutedFPlayer == null) {
             fCommand.sendMeMessage("command.null-player");
             return true;
         }
 
         int time = fCommand.getTimeFromString(stringTime);
 
-        if(time < -1){
+        if (time < -1) {
             fCommand.sendMeMessage("command.long-number");
             return true;
         }
 
-        if(fCommand.isHaveCD()) return true;
+        if (fCommand.isHaveCD()) return true;
 
-        String reason = strings.length > 2 ? ObjectUtil.toString(strings, 2) : Main.locale.getString("command.mute.default-reason");
+        String reason = strings.length > 2
+                ? ObjectUtil.toString(strings, 2)
+                : locale.getString("command.mute.default-reason");
 
-        String formatString = Main.locale.getString("command.mute.global-message")
+        String formatString = locale.getString("command.mute.global-message")
                 .replace("<player>", mutedFPlayer.getRealName())
                 .replace("<time>", ObjectUtil.convertTimeToString(time))
-                .replace("<reason>", reason);
+                .replace("<reason>", reason)
+                .replace("<moderator>", commandSender.getName());
 
-        boolean announceModeration = Main.config.getBoolean("command.mute.announce");
+        boolean announceModeration = config.getBoolean("command.mute.announce");
+
+        if (announceModeration && HookManager.enabledDiscordSRV) FDiscordSRV.sendDiscordMessageToChannel(formatString);
 
         Set<Player> receivers = announceModeration
                 ? new HashSet<>(Bukkit.getOnlinePlayers())
@@ -70,15 +75,17 @@ public class CommandMute extends FTabCompleter {
                 .filter(player -> player.hasPermission("flectonechat.mute") || player.equals(mutedFPlayer.getPlayer()))
                 .collect(Collectors.toSet());
 
-        fCommand.sendGlobalMessage(receivers, formatString, false);
+        fCommand.sendFilterGlobalMessage(receivers, formatString, "", null, false);
 
-        if(Main.isHavePlasmoVoice) {
-            FlectonePlasmoVoice.mute(mutedFPlayer.isMuted(), mutedFPlayer.getRealName(), strings[1], reason);
+        String moderator = (commandSender instanceof Player player)
+                ? player.getUniqueId().toString()
+                : null;
+
+        mutedFPlayer.mute(time, reason, moderator);
+
+        if (HookManager.enabledPlasmoVoice) {
+            FPlasmoVoice.mute(mutedFPlayer.isMuted(), mutedFPlayer.getRealName(), strings[1], reason);
         }
-
-        mutedFPlayer.setMuteTime(time + ObjectUtil.getCurrentTime());
-        mutedFPlayer.setMuteReason(reason);
-        mutedFPlayer.setUpdated(true);
 
         return true;
     }
@@ -88,12 +95,20 @@ public class CommandMute extends FTabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
         wordsList.clear();
 
-        if(strings.length == 1) isOfflinePlayer(strings[0]);
-        else if(strings.length == 2) isFormatString(strings[1]);
-        else if (strings.length == 3) isStartsWith(strings[2], "(reason)");
+        switch (strings.length){
+            case 1 -> isConfigOnlineModePlayer(strings[0]);
+            case 2 -> isFormatString(strings[1]);
+            case 3 -> isTabCompleteMessage(strings[2], "tab-complete.reason");
+        }
 
         Collections.sort(wordsList);
 
         return wordsList;
+    }
+
+    @NotNull
+    @Override
+    public String getCommandName() {
+        return "mute";
     }
 }

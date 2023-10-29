@@ -1,120 +1,151 @@
 package net.flectone.managers;
 
-import net.flectone.utils.ObjectUtil;
-import org.bukkit.command.CommandSender;
-import org.bukkit.configuration.InvalidConfigurationException;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
 import net.flectone.Main;
+import net.flectone.misc.files.FYamlConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Set;
 
-public class FileManager extends FileConfiguration {
+public class FileManager {
 
-    private FileConfiguration fileConfiguration;
-    private File file;
+    private static String lastVersion = "";
+    private static final String dataFolder = Main.getInstance().getDataFolder().getAbsolutePath() + File.separator;
+    private static final String languagesPath = "language" + File.separator;
+    private static final String iconsPath = "icons" + File.separator;
+    public static FYamlConfiguration config;
+    public static FYamlConfiguration locale;
 
-    public FileManager(String path){
-        this.file = new File(Main.getInstance().getDataFolder() + File.separator + path);
+    public static void initialize() {
+        config = load("config.yml");
+        lastVersion = config.getString("version");
 
-        if(path.contains("language")){
-            checkExists("language/ru.yml");
-            checkExists("language/en.yml");
-        } else checkExists(path);
+        String currentVersion = Main.getInstance().getDescription().getVersion();
+        boolean needMigrate = false;
 
-        this.fileConfiguration = YamlConfiguration.loadConfiguration(file);
+        if (compareVersions(currentVersion, lastVersion) == 1) {
+            Main.warning("⚠ Your configs have been updated to " + currentVersion);
 
-        InputStreamReader defConfigStream = new InputStreamReader(Main.getInstance().getResource(path), StandardCharsets.UTF_8);
+            config.set("version", currentVersion);
+            config.save();
 
-        YamlConfiguration internalLangConfig = YamlConfiguration.loadConfiguration(defConfigStream);
-
-        internalLangConfig.getKeys(true).parallelStream()
-                .filter(string -> !fileConfiguration.contains(string))
-                .forEach(string -> fileConfiguration.set(string, internalLangConfig.get(string)));
-
-        try {
-            fileConfiguration.save(file);
-        } catch (IOException io) {
-            io.printStackTrace();
+            migrate(config);
+            needMigrate = true;
         }
 
+        loadLocale(needMigrate);
+        loadIcons();
     }
 
-    private void checkExists(String path){
-        if(!new File(Main.getInstance().getDataFolder() + File.separator + path).exists())
-            Main.getInstance().saveResource(path, false);
-    }
+    private static void loadLocale(boolean needMigrate) {
+        FYamlConfiguration ruLocale = load(languagesPath + "ru.yml");
+        FYamlConfiguration enLocale = load(languagesPath + "en.yml");
 
-    public void saveFile(){
-        try {
+        String customLocaleName = config.getString("language");
+        FYamlConfiguration customLocale = switch (customLocaleName) {
+            case "ru" -> ruLocale;
+            case "en" -> enLocale;
+            default -> load(languagesPath + customLocaleName + ".yml");
+        };
 
-            fileConfiguration.save(file);
-            this.file = new File(file.getPath());
-
-        } catch (IOException error){
-            Main.getInstance().getLogger().warning(error.getLocalizedMessage());
+        if (customLocale == null) {
+            customLocale = enLocale;
         }
+
+        if (needMigrate) {
+            migrate(ruLocale);
+            migrate(enLocale);
+            migrate(customLocale);
+        }
+
+        locale = customLocale;
     }
 
-    public Set<String> getKeys(){
-        return fileConfiguration.getKeys(true);
+    private static void loadIcons() {
+        List<String> iconNames = config.getStringList("server.icon.names");
+        iconNames.add("maintenance");
+
+        iconNames.stream().filter(icon -> !new File(dataFolder + iconsPath + icon + ".png").exists()
+                        && Main.getInstance().getResource(iconsPath + icon + ".png") != null)
+                .forEach(icon -> Main.getInstance().saveResource(iconsPath + icon + ".png", false));
     }
 
+    public static FYamlConfiguration load(String filePath) {
+        File file = new File(dataFolder + filePath);
+        FYamlConfiguration fileConfiguration = null;
 
-    public List<String> getStringList(String path){
-        return fileConfiguration.getStringList(path);
+        try {
+            if (!file.exists()) Main.getInstance().saveResource(filePath, false);
+
+            fileConfiguration = new FYamlConfiguration(file, filePath);
+            fileConfiguration.save(file);
+
+        } catch (IOException | IllegalArgumentException exception) {
+            Main.warning("Failed to save " + filePath + " file");
+            exception.printStackTrace();
+        }
+
+        return fileConfiguration;
     }
 
+    private static void migrate(FYamlConfiguration oldFile) {
+        InputStream inputStream = Main.getInstance().getResource(oldFile.getResourceFilePath().replace('\\', '/'));
 
-    public void set(String string, List<String> stringList){
-        fileConfiguration.set(string, stringList);
+        if (inputStream == null) return;
+
+        InputStreamReader defConfigStream = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
+
+        YamlConfiguration resourceFile = YamlConfiguration.loadConfiguration(defConfigStream);
+
+        resourceFile.getKeys(true).parallelStream()
+                .filter(string -> {
+                    if (!oldFile.contains(string)) return true;
+
+                    Object objectA = oldFile.get(string);
+                    Object objectB = resourceFile.get(string);
+
+                    return objectA != null && objectB != null && !objectA.getClass().equals(objectB.getClass());
+                })
+                .forEach(string -> oldFile.set(string, resourceFile.get(string)));
+
+        oldFile.save();
     }
 
-    public void setFileConfiguration(FileConfiguration fileConfiguration) {
-        this.fileConfiguration = fileConfiguration;
+    public static String getLastVersion() {
+        return lastVersion;
     }
 
-    @Override
-    public String getString(String string){
-        return fileConfiguration.getString(string);
-    }
+    /**
+     * Compares two version strings and returns:<br>
+     * -1 if version1 is less than version2,<br>
+     * 0 if version1 is equal to version2, or<br>
+     * 1 if version1 is greater than version2.<br>
+     *
+     * @param version1 The first version string
+     * @param version2 The second version string
+     * @return -1, 0, or 1 based on the comparison result
+     */
+    public static int compareVersions(@NotNull String version1, @NotNull String version2) {
+        if (version1.isEmpty()) return -1;
+        if (version2.isEmpty()) return 1;
 
-    @Override
-    public int getInt(String string){
-        return Integer.parseInt(fileConfiguration.getString(string));
-    }
+        String[] parts1 = version1.split("\\.");
+        String[] parts2 = version2.split("\\.");
 
-    @Override
-    public boolean getBoolean(String string){
-        return Boolean.parseBoolean(fileConfiguration.getString(string));
-    }
+        for (int x = 0; x < parts1.length; x++) {
+            int num1 = Integer.parseInt(parts1[x]);
+            int num2 = Integer.parseInt(parts2[x]);
 
-    public String getFormatString(String string, CommandSender sender, CommandSender papiPlayer){
-        string = fileConfiguration.getString(string);
-        return ObjectUtil.formatString(string, sender, papiPlayer);
-    }
 
-    public String getFormatString(String string, CommandSender sender){
-        string = fileConfiguration.getString(string);
-        return ObjectUtil.formatString(string, sender);
-    }
+            if (num1 > num2) return 1;
+            else if (num1 < num2) return -1;
+        }
 
-    @Override
-    public String saveToString() {
-        return null;
-    }
-
-    @Override
-    public void loadFromString(String contents) throws InvalidConfigurationException {
-
-    }
-
-    public void setObject(String path, Object object) {
-        fileConfiguration.set(path, object);
+        return 0;
     }
 }

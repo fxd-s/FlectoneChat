@@ -1,13 +1,45 @@
 package net.flectone.messages;
 
+import org.bukkit.ChatColor;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
+
 public class WordParams {
 
-
     private boolean isPlayerPing = false;
-
     private String playerPingName;
+    private boolean clickable = false;
+    private boolean isItem = false;
+    private boolean isUrl = false;
+    private String url;
+    private boolean isHide;
+    private String hideMessage;
+    private String text;
+    private boolean isFormatted;
+    private boolean isCords;
 
+    private boolean isStats;
 
+    public void setCords(boolean cords) {
+        isCords = cords;
+    }
+
+    public boolean isCords() {
+        return isCords;
+    }
+
+    public void setStats(boolean stats) {
+        isStats = stats;
+    }
+
+    public boolean isStats() {
+        return isStats;
+    }
+
+    @Nullable
     public String getPlayerPingName() {
         return playerPingName;
     }
@@ -20,8 +52,6 @@ public class WordParams {
         isPlayerPing = playerPing;
     }
 
-    private boolean clickable = false;
-
     public void setClickable(boolean clickable, String playerPingName) {
         this.clickable = clickable;
         this.playerPingName = playerPingName;
@@ -31,25 +61,15 @@ public class WordParams {
         return clickable;
     }
 
-    private boolean isItem = false;
+    public boolean isItem() {
+        return isItem;
+    }
 
     public void setItem(boolean item) {
         isItem = item;
     }
 
-    public boolean isItem() {
-        return isItem;
-    }
-
-    private boolean isUrl = false;
-    
-    private String url;
-
-    public void setUrl(String url) {
-        isUrl = true;
-        this.url = url;
-    }
-
+    @Nullable
     public String getUrl() {
         return url;
     }
@@ -58,7 +78,10 @@ public class WordParams {
         return isUrl;
     }
 
-    private boolean isHide;
+    public void setUrl(String url) {
+        isUrl = true;
+        this.url = url;
+    }
 
     public boolean isHide() {
         return isHide;
@@ -68,37 +91,64 @@ public class WordParams {
         isHide = hide;
     }
 
-    private String hideMessage;
-
-    public void setHideMessage(String hideMessage) {
-        this.hideMessage = hideMessage;
-    }
-
+    @Nullable
     public String getHideMessage() {
         return hideMessage;
     }
 
-    private String text;
-
-    public void setText(String text) {
-        this.text = text;
+    public void setHideMessage(@NotNull String hideMessage) {
+        this.hideMessage = hideMessage;
     }
 
+    @NotNull
     public String getText() {
         return text;
     }
 
-    private boolean isFormatted;
+    public String getFormatting() {
+        return getChatColor("**") + getChatColor("__") + getChatColor("##") + getChatColor("~~") + getChatColor("??");
+    }
 
-    public void setFormatted(boolean formatted) {
-        isFormatted = formatted;
+    public String getChatColor(String param) {
+        if (!parameters.contains(param)) return "";
+
+        return switch (param) {
+            case "**" -> String.valueOf(ChatColor.BOLD);
+            case "__" -> String.valueOf(ChatColor.UNDERLINE);
+            case "##" -> String.valueOf(ChatColor.ITALIC);
+            case "~~" -> String.valueOf(ChatColor.STRIKETHROUGH);
+            case "??" -> String.valueOf(ChatColor.MAGIC);
+            default -> "";
+        };
+    }
+
+    public void setText(@NotNull String text) {
+        this.text = text;
     }
 
     public boolean isFormatted() {
         return isFormatted;
     }
 
-    public boolean isEdited(){
-        return isPlayerPing() || isHide() || isUrl() || isClickable() || isItem() || isFormatted();
+    public void setFormatted(boolean formatted) {
+        isFormatted = formatted;
+    }
+
+    public boolean isEdited() {
+        return isPlayerPing() || isHide() || isUrl() || isClickable() || isItem() || isFormatted() || isCords() || isStats();
+    }
+
+    private final List<String> parameters = new ArrayList<>();
+
+    public void addParameters(List<String> parameters) {
+        this.parameters.addAll(parameters);
+    }
+
+    public boolean contains(String parameter) {
+        return parameters.contains(parameter);
+    }
+
+    public List<String> getParameters() {
+        return parameters;
     }
 }

@@ -1,56 +1,58 @@
 package net.flectone.commands;
 
 import net.flectone.Main;
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FPlayer;
-import net.flectone.integrations.voicechats.plasmovoice.FlectonePlasmoVoice;
+import net.flectone.integrations.voicechats.plasmovoice.FPlasmoVoice;
 import net.flectone.managers.FPlayerManager;
-import net.flectone.custom.FTabCompleter;
+import net.flectone.managers.HookManager;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FPlayer;
+import net.flectone.misc.entity.player.PlayerMod;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
 
-public class CommandUnmute extends FTabCompleter {
-
-    public CommandUnmute(){
-        super.commandName = "unmute";
-    }
+public class CommandUnmute implements FTabCompleter {
 
     @Override
     public boolean onCommand(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
+        Main.getDataThreadPool().execute(() -> command(commandSender, command, s, strings));
+        return true;
+    }
 
-        FCommands fCommand = new FCommands(commandSender, command.getName(), s, strings);
+    private void command(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
+        FCommand fCommand = new FCommand(commandSender, command.getName(), s, strings);
 
-        if(fCommand.isInsufficientArgs(1)) return true;
+        if (fCommand.isInsufficientArgs(1)) return;
 
         FPlayer fPlayer = FPlayerManager.getPlayerFromName(strings[0]);
 
-        if(fPlayer == null){
+        if (fPlayer == null) {
             fCommand.sendMeMessage("command.null-player");
-            return true;
+            return;
         }
 
-        if(fPlayer.getMuteTime() < 0){
+        PlayerMod playerMod = Main.getDatabase()
+                .getPlayerInfo("mutes", "player", fPlayer.getUUID().toString());
+
+        if (playerMod == null || playerMod.isExpired()) {
             fCommand.sendMeMessage("command.unmute.not-muted");
-            return true;
+            return;
         }
 
-        if(fCommand.isHaveCD()) return true;
+        if (fCommand.isHaveCD()) return;
 
-        fPlayer.setMuteTime(0);
-        fPlayer.setMuteReason("");
-        fPlayer.setUpdated(true);
+        if (HookManager.enabledPlasmoVoice) {
+            FPlasmoVoice.unmute(fPlayer.getRealName());
+        }
+
+        fPlayer.unmute();
 
         fCommand.sendMeMessage("command.unmute.message", "<player>", fPlayer.getRealName());
-
-        if(Main.isHavePlasmoVoice) {
-            FlectonePlasmoVoice.unmute(fPlayer.getRealName());
-        }
-
-        return true;
     }
 
     @Nullable
@@ -58,14 +60,19 @@ public class CommandUnmute extends FTabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
         wordsList.clear();
 
-        if(strings.length == 1){
-            FPlayerManager.getPlayers().parallelStream()
-                    .filter(FPlayer::isMuted)
-                    .forEach(fPlayer -> isStartsWith(strings[0], fPlayer.getRealName()));
+        if (strings.length == 1) {
+            Main.getDatabase().getPlayerNameList("mutes", "player").parallelStream()
+                    .forEach(playerName -> isStartsWith(strings[0], playerName));
         }
 
         Collections.sort(wordsList);
 
         return wordsList;
+    }
+
+    @NotNull
+    @Override
+    public String getCommandName() {
+        return "unmute";
     }
 }

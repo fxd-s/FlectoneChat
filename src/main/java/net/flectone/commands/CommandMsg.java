@@ -1,10 +1,10 @@
 package net.flectone.commands;
 
 import net.flectone.Main;
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FPlayer;
 import net.flectone.managers.FPlayerManager;
-import net.flectone.custom.FTabCompleter;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FPlayer;
 import net.flectone.utils.ObjectUtil;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -15,51 +15,70 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collections;
 import java.util.List;
 
-public class CommandMsg extends FTabCompleter {
+import static net.flectone.managers.FileManager.config;
+import static net.flectone.managers.FileManager.locale;
 
-    public CommandMsg(){
-        super.commandName = "msg";
-    }
+public class CommandMsg implements FTabCompleter {
 
     @Override
     public boolean onCommand(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
+        Main.getDataThreadPool().execute(() ->
+                command(commandSender, command, s, strings));
 
-        FCommands fCommand = new FCommands(commandSender, command.getName(), s, strings);
+        return true;
+    }
 
-        if(fCommand.isInsufficientArgs(2)) return true;
+    private void command(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
+        FCommand fCommand = new FCommand(commandSender, command.getName(), s, strings);
+
+        if (fCommand.isInsufficientArgs(2)) return;
 
         String playerName = strings[0];
         FPlayer secondFPlayer = FPlayerManager.getPlayerFromName(playerName);
-        if(secondFPlayer == null){
+        if (secondFPlayer == null) {
             fCommand.sendMeMessage("command.null-player");
-            return true;
+            return;
         }
 
-        if(fCommand.isHaveCD()) return true;
+        if (fCommand.isHaveCD() || fCommand.isMuted()) return;
 
-        if(fCommand.isMuted()) return true;
+        if (fCommand.isDisabled()) {
+            fCommand.sendMeMessage("command.you-disabled");
+            return;
+        }
 
         String message = ObjectUtil.toString(strings, 1);
 
-        if(!fCommand.isConsole()){
-            if(fCommand.getSenderName().equalsIgnoreCase(playerName)){
-                commandSender.sendMessage(Main.locale.getFormatString("command.msg.myself", commandSender) + message);
-                return true;
+        if (!secondFPlayer.isOnline() && config.getBoolean("command.mail.enable")) {
+            fCommand.dispatchCommand("mail " + playerName + " " + message);
+            return;
+        }
+
+        if (!secondFPlayer.getChatInfo().getOption("msg")) {
+            fCommand.sendMeMessage("command.he-disabled");
+            return;
+        }
+
+        if (!fCommand.isConsole()) {
+            if (fCommand.getSenderName().equalsIgnoreCase(playerName)) {
+                commandSender.sendMessage(locale.getFormatString("command.msg.myself", commandSender) + message);
+                return;
             }
 
-            if(fCommand.getFPlayer().isIgnored(secondFPlayer.getPlayer())){
+            if (fCommand.getFPlayer() != null && fCommand.getFPlayer().isIgnored(secondFPlayer.getPlayer())) {
                 fCommand.sendMeMessage("command.you_ignore");
-                return true;
+                return;
             }
-            if(secondFPlayer.isIgnored((Player) commandSender)){
+
+            if (secondFPlayer.isIgnored((Player) commandSender)) {
                 fCommand.sendMeMessage("command.he_ignore");
-                return true;
+                return;
             }
         }
 
-        fCommand.sendTellMessage(commandSender, secondFPlayer.getPlayer(), message);
+        if(secondFPlayer.getPlayer() == null) return;
 
-        return true;
+        fCommand.sendTellMessage(commandSender, secondFPlayer.getPlayer(), message);
     }
 
     @Nullable
@@ -67,10 +86,9 @@ public class CommandMsg extends FTabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
         wordsList.clear();
 
-        if(strings.length == 1){
-            isOnlinePlayer(strings[0]);
-        } else if(strings.length == 2) {
-            isStartsWith(strings[1], "(message)");
+        switch (strings.length){
+            case 1 -> isConfigOnlineModePlayer(strings[0]);
+            case 2 -> isTabCompleteMessage(strings[1]);
         }
 
         Collections.sort(wordsList);
@@ -78,4 +96,9 @@ public class CommandMsg extends FTabCompleter {
         return wordsList;
     }
 
+    @NotNull
+    @Override
+    public String getCommandName() {
+        return "msg";
+    }
 }

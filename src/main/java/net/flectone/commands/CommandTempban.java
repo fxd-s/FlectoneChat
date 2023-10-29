@@ -1,10 +1,11 @@
 package net.flectone.commands;
 
-import net.flectone.Main;
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FPlayer;
-import net.flectone.custom.FTabCompleter;
+import net.flectone.integrations.discordsrv.FDiscordSRV;
 import net.flectone.managers.FPlayerManager;
+import net.flectone.managers.HookManager;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FPlayer;
 import net.flectone.utils.ObjectUtil;
 import org.apache.commons.lang.StringUtils;
 import org.bukkit.Bukkit;
@@ -20,23 +21,22 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-public class CommandTempban extends FTabCompleter {
+import static net.flectone.managers.FileManager.config;
+import static net.flectone.managers.FileManager.locale;
 
-    public CommandTempban(){
-        super.commandName = "tempban";
-    }
+public class CommandTempban implements FTabCompleter {
 
     @Override
     public boolean onCommand(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
 
-        FCommands fCommand = new FCommands(commandSender, command.getName(), s, strings);
+        FCommand fCommand = new FCommand(commandSender, command.getName(), s, strings);
 
-        if(fCommand.isInsufficientArgs(1)) return true;
+        if (fCommand.isInsufficientArgs(1)) return true;
 
         String stringTime = strings.length > 1 ? strings[1] : "permanent";
 
-        if((!fCommand.isStringTime(stringTime) || !StringUtils.isNumeric(stringTime.substring(0, stringTime.length() - 1)))
-                && !stringTime.equals("permanent")){
+        if ((!fCommand.isStringTime(stringTime) || !StringUtils.isNumeric(stringTime.substring(0, stringTime.length() - 1)))
+                && !stringTime.equals("permanent") && !stringTime.equals("0")) {
             fCommand.sendUsageMessage();
             return true;
         }
@@ -44,30 +44,33 @@ public class CommandTempban extends FTabCompleter {
         String playerName = strings[0];
         FPlayer bannedFPlayer = FPlayerManager.getPlayerFromName(playerName);
 
-        if(bannedFPlayer == null){
+        if (bannedFPlayer == null) {
             fCommand.sendMeMessage("command.null-player");
             return true;
         }
 
         int time = fCommand.getTimeFromString(stringTime);
 
-        if(time < -1){
+        if (time < -1) {
             fCommand.sendMeMessage("command.long-number");
             return true;
         }
 
-        if(fCommand.isHaveCD()) return true;
+        if (fCommand.isHaveCD()) return true;
 
-        String reason = strings.length > 2 ? ObjectUtil.toString(strings, 2) : Main.locale.getString("command.tempban.default-reason");
+        String reason = strings.length > 2 ? ObjectUtil.toString(strings, 2) : locale.getString("command.tempban.default-reason");
 
         String globalStringMessage = time == -1 ? "command.ban.global-message" : "command.tempban.global-message";
 
-        String globalMessage = Main.locale.getString(globalStringMessage)
+        String globalMessage = locale.getString(globalStringMessage)
                 .replace("<player>", bannedFPlayer.getRealName())
                 .replace("<time>", ObjectUtil.convertTimeToString(time))
-                .replace("<reason>", reason);
+                .replace("<reason>", reason)
+                .replace("<moderator>", commandSender.getName());
 
-        boolean announceModeration = Main.config.getBoolean("command.tempban.announce");
+        boolean announceModeration = config.getBoolean("command.tempban.announce");
+
+        if (announceModeration && HookManager.enabledDiscordSRV) FDiscordSRV.sendDiscordMessageToChannel(globalMessage);
 
         Set<Player> receivers = announceModeration
                 ? new HashSet<>(Bukkit.getOnlinePlayers())
@@ -75,21 +78,13 @@ public class CommandTempban extends FTabCompleter {
                 .filter(player -> player.hasPermission("flectonechat.ban") || player.equals(bannedFPlayer.getPlayer()))
                 .collect(Collectors.toSet());
 
-        fCommand.sendGlobalMessage(receivers, globalMessage, false);
+        fCommand.sendFilterGlobalMessage(receivers, globalMessage, "", null, false);
 
-        bannedFPlayer.setTempBanTime(time == -1 ? -1 : time + ObjectUtil.getCurrentTime());
-        bannedFPlayer.setTempBanReason(reason);
-        bannedFPlayer.setUpdated(true);
+        String moderator = (commandSender instanceof Player player)
+                ? player.getUniqueId().toString()
+                : null;
 
-        if(!bannedFPlayer.isOnline()) return true;
-
-        String localStringMessage = time == -1 ? "command.ban.local-message" : "command.tempban.local-message";
-
-        String localMessage = Main.locale.getFormatString(localStringMessage, bannedFPlayer.getPlayer())
-                .replace("<time>", ObjectUtil.convertTimeToString(time))
-                .replace("<reason>", reason);
-
-        bannedFPlayer.getPlayer().kickPlayer(localMessage);
+        bannedFPlayer.tempban(time, reason, moderator);
 
         return true;
     }
@@ -99,14 +94,24 @@ public class CommandTempban extends FTabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
         wordsList.clear();
 
-        if(strings.length == 1) isOfflinePlayer(strings[0]);
-        else if(strings.length == 2){
-            isFormatString(strings[1]);
-            isStartsWith(strings[1], "permanent");
-        } else if (strings.length == 3) isStartsWith(strings[2], "(reason)");
+        switch (strings.length) {
+            case 1 -> isConfigOnlineModePlayer(strings[0]);
+            case 2 -> {
+                isFormatString(strings[1]);
+                isStartsWith(strings[1], "permanent");
+                isStartsWith(strings[1], "0");
+            }
+            case 3 -> isTabCompleteMessage(strings[2], "tab-complete.reason");
+        }
 
         Collections.sort(wordsList);
 
         return wordsList;
+    }
+
+    @NotNull
+    @Override
+    public String getCommandName() {
+        return "tempban";
     }
 }

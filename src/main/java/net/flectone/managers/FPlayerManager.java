@@ -1,131 +1,175 @@
 package net.flectone.managers;
 
 import net.flectone.Main;
-import net.flectone.custom.FEntity;
-import net.flectone.custom.FPlayer;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FPlayer;
+import net.flectone.misc.entity.player.PlayerMod;
+import org.bukkit.BanEntry;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.scoreboard.Scoreboard;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
+import static net.flectone.managers.FileManager.config;
+import static net.flectone.managers.FileManager.locale;
+
 public class FPlayerManager {
 
-    private static final HashMap<String, FPlayer> fPlayerHashMap = new HashMap<>();
+    private static final List<String> bannedPlayers = new ArrayList<>();
+    private static final HashMap<String, FPlayer> usedFPlayers = new HashMap<>();
+    private static Scoreboard scoreBoard;
 
-    public static Collection<FPlayer> getPlayers(){
-        return fPlayerHashMap.values();
+    public static void setScoreBoard() {
+        scoreBoard = config.getBoolean("scoreboard.custom")
+                ? Bukkit.getScoreboardManager().getNewScoreboard()
+                : Bukkit.getScoreboardManager().getMainScoreboard();
     }
 
-    public static void loadPlayers(){
-        Arrays.stream(Bukkit.getOfflinePlayers())
-                .forEach(FPlayerManager::addPlayer);
-
-        Main.getDatabase().loadDatabase();
-
-        Bukkit.getOnlinePlayers().parallelStream()
-                .forEach(player -> getPlayer(player).initialize(player));
+    @NotNull
+    public static Scoreboard getScoreBoard() {
+        return scoreBoard;
     }
 
-    public static void loadBanList(){
+    public static void loadPlayers() {
+        Main.getDataThreadPool().execute(() -> {
+
+            Arrays.stream(Bukkit.getOfflinePlayers()).forEach(offlinePlayer -> {
+                Main.getDatabase().insertPlayer(offlinePlayer.getUniqueId());
+
+                if (offlinePlayer.getName() != null) FTabCompleter.offlinePlayerList.add(offlinePlayer.getName());
+            });
+
+            Bukkit.getOnlinePlayers().forEach(player ->
+                    createFPlayer(player).synchronizeDatabase());
+
+            Main.getDatabase().clearOldRows("mutes");
+            Main.getDatabase().clearOldRows("bans");
+            Main.getDatabase().clearOldRows("warns");
+        });
+    }
+
+    public static List<String> getBannedPlayers() {
+        return bannedPlayers;
+    }
+
+    public static void loadBanList() {
+        if (!config.getBoolean("command.tempban.enable")) return;
+
+        bannedPlayers.clear();
+        Main.getDataThreadPool().execute(() ->
+                bannedPlayers.addAll(Main.getDatabase().getPlayerNameList("bans", "player")));
+
         BanList banList = Bukkit.getBanList(BanList.Type.NAME);
+        if (banList.getBanEntries().isEmpty()) return;
 
-        Bukkit.getBannedPlayers().parallelStream()
-                .forEach(offlinePlayer -> {
-                    FPlayer fPlayer = FPlayerManager.getPlayer(offlinePlayer);
-                    if(fPlayer == null) return;
+        Bukkit.getBannedPlayers().parallelStream().forEach(offlinePlayer -> {
+            if (offlinePlayer.getName() == null) return;
 
-                    String reason = banList.getBanEntry(offlinePlayer.getName()).getReason();
-                    fPlayer.setTempBanReason(reason);
-                    fPlayer.setTempBanTime(-1);
-                    fPlayer.setUpdated(true);
+            BanEntry banEntry = banList.getBanEntry(offlinePlayer.getName());
+            if (banEntry == null) return;
 
-                    banList.pardon(offlinePlayer.getName());
-                });
+            String source = banEntry.getSource();
+
+            source = source.equalsIgnoreCase("console") || source.equalsIgnoreCase("plugin")
+                    ? null
+                    : Bukkit.getOfflinePlayer(source).getUniqueId().toString();
+
+            String reason = banEntry.getReason() != null
+                    ? banEntry.getReason()
+                    : locale.getString("command.tempban.default-reason");
+
+            PlayerMod playerMod = new PlayerMod(offlinePlayer.getUniqueId().toString(), -1, reason, source);
+            Main.getDataThreadPool().execute(() ->
+                    Main.getDatabase().updatePlayerInfo("bans", playerMod));
+
+            banList.pardon(offlinePlayer.getName());
+        });
     }
 
-    public static void uploadPlayers(){
-        fPlayerHashMap.values().stream()
-                .filter(FPlayer::isUpdated)
-                .forEach(fPlayer -> {
-                    Main.getDatabase().uploadDatabase(fPlayer);
-                    fPlayer.setUpdated(false);
-                });
+    public static void clearPlayers() {
+        usedFPlayers.values().stream()
+                .filter(Objects::nonNull)
+                .forEach(FPlayer::removeTeam);
+
+        usedFPlayers.clear();
     }
 
-    public static void removePlayersFromTeams(){
-        fPlayerHashMap.values().forEach(FEntity::removePlayerFromTeam);
-    }
-
-    public static void addPlayer(@NotNull OfflinePlayer offlinePlayer){
-        String uuid = offlinePlayer.getUniqueId().toString();
-        if(fPlayerHashMap.containsKey(uuid)) return;
-
-        FPlayer fPlayer = new FPlayer(offlinePlayer);
-        fPlayerHashMap.put(uuid, fPlayer);
-    }
-
-    public static FPlayer addPlayer(@NotNull Player player){
-        String uuid = player.getUniqueId().toString();
-        if(fPlayerHashMap.containsKey(uuid)) {
-            FPlayer fPlayer = getPlayer(uuid);
-            fPlayer.initialize(player);
-            return fPlayer;
-        }
-
+    public static FPlayer createFPlayer(@NotNull Player player) {
         FPlayer fPlayer = new FPlayer(player);
-        fPlayerHashMap.put(uuid, fPlayer);
+        usedFPlayers.put(player.getName(), fPlayer);
+
         fPlayer.initialize(player);
-        Main.getDatabase().setPlayer(fPlayer.getUUID());
         return fPlayer;
     }
 
-    public static void addPlayer(String uuid){
-        addPlayer(Bukkit.getOfflinePlayer(UUID.fromString(uuid)));
-    }
+    @Nullable
+    public static FPlayer getPlayerFromName(@NotNull String name) {
+        if (usedFPlayers.containsKey(name)) return usedFPlayers.get(name);
 
-    public static void addPlayer(UUID uuid){
-        addPlayer(Bukkit.getOfflinePlayer(uuid));
-    }
+        List<OfflinePlayer> offlinePlayerList = Arrays.asList(Bukkit.getOfflinePlayers());
 
-    public static FPlayer getPlayerFromName(String name){
-        return fPlayerHashMap.values()
+        offlinePlayerList = offlinePlayerList
                 .parallelStream()
-                .filter(fPlayer -> fPlayer.getRealName().equals(name))
+                .filter(player -> player.getName() != null && player.getName().equalsIgnoreCase(name))
+                .toList();
+
+        OfflinePlayer offlinePlayer = offlinePlayerList.size() == 1
+                ? offlinePlayerList.get(0)
+                : offlinePlayerList.stream()
+                .filter(player -> player.getName().equals(name))
                 .findFirst().orElse(null);
+
+        if (offlinePlayer == null) {
+            usedFPlayers.put(name, null);
+            return null;
+        }
+
+        FPlayer fPlayer = FPlayerManager.getPlayer(offlinePlayer);
+        fPlayer = fPlayer != null ? fPlayer : new FPlayer(offlinePlayer);
+        usedFPlayers.put(name, fPlayer);
+
+        return fPlayer;
     }
 
-    public static FPlayer getPlayer(@NotNull OfflinePlayer offlinePlayer){
-        return getPlayer(offlinePlayer.getUniqueId());
+    public static HashMap<String, FPlayer> getUsedFPlayers() {
+        return usedFPlayers;
     }
 
-    public static FPlayer getPlayer(@NotNull Player player){
-        return getPlayer(player.getUniqueId());
+    @Nullable
+    public static FPlayer getPlayer(@NotNull OfflinePlayer offlinePlayer) {
+        if (offlinePlayer.getName() == null) return null;
+        return getPlayer(offlinePlayer.getName());
     }
 
-    public static FPlayer getPlayer(String uuid){
-        return fPlayerHashMap.get(uuid);
+    @Nullable
+    public static FPlayer getPlayer(@NotNull Player player) {
+        return getPlayer(player.getName());
     }
 
-    public static FPlayer getPlayer(UUID uuid){
-        return getPlayer(uuid.toString());
+    @Nullable
+    public static FPlayer getPlayer(@NotNull String name) {
+        return usedFPlayers.get(name);
     }
 
-    public static void removePlayer(String uuid){
-        fPlayerHashMap.remove(uuid);
+    @Nullable
+    public static FPlayer getPlayer(@NotNull UUID uuid) {
+        return usedFPlayers.get(Bukkit.getOfflinePlayer(uuid).getName());
     }
 
-    public static void removePlayer(UUID uuid){
-        removePlayer(uuid.toString());
+
+    public static void removePlayer(@NotNull String name) {
+        if (usedFPlayers.get(name) == null) return;
+        usedFPlayers.get(name).removeTeam();
+        usedFPlayers.remove(name);
     }
 
-    public static void removePlayer(@NotNull Player player){
-        removePlayer(player.getUniqueId());
+    public static void removePlayer(@NotNull Player player) {
+        removePlayer(player.getName());
     }
 
-    public static void removePlayer(@NotNull OfflinePlayer offlinePlayer){
-        removePlayer(offlinePlayer.getUniqueId());
-    }
 }

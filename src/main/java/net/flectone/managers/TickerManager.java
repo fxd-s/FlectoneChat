@@ -1,44 +1,55 @@
 package net.flectone.managers;
 
-import net.flectone.Main;
-import net.flectone.custom.FBukkitRunnable;
-import net.flectone.tickers.AfkTicker;
-import net.flectone.tickers.ChatBubbleTicker;
-import net.flectone.tickers.DatabaseTicker;
-import net.flectone.tickers.TabTicker;
+import net.flectone.misc.runnables.FBukkitRunnable;
+import net.flectone.tickers.*;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.checkerframework.checker.units.qual.A;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static net.flectone.managers.FileManager.config;
 
 public class TickerManager {
 
     private static final List<FBukkitRunnable> bukkitRunnableList = new ArrayList<>();
 
-    private static void addTicker(FBukkitRunnable bukkitRunnable){
+    private static void addTicker(FBukkitRunnable bukkitRunnable) {
         bukkitRunnableList.add(bukkitRunnable);
     }
 
-    public static void clear(){
+    public static void clear() {
         bukkitRunnableList.parallelStream().forEach(BukkitRunnable::cancel);
         bukkitRunnableList.clear();
     }
 
-    public static void start(){
-        addTicker(new DatabaseTicker());
+    public static void start() {
 
-        if(Main.config.getBoolean("chat.bubble.enable")){
+        if (config.getBoolean("chat.bubble.enable")) {
             addTicker(new ChatBubbleTicker());
         }
 
-        if(Main.config.getBoolean("command.afk.timeout.enable")){
+        if (config.getBoolean("command.afk.timeout.enable")) {
             addTicker(new AfkTicker());
         }
 
-        if(Main.config.getBoolean("tab.update.enable")) {
+        if (config.getBoolean("tab.update.enable")) {
             addTicker(new TabTicker());
         }
+
+        if (config.getBoolean("tab.player-ping.enable")) {
+            PlayerPingTicker.registerPingObjective();
+            addTicker(new PlayerPingTicker());
+        } else PlayerPingTicker.unregisterPingObjective();
+
+        if (config.getBoolean("server.brand.enable") && config.getBoolean("server.brand.update.enable")) {
+            addTicker(new ServerBrandTicker());
+        }
+
+        if (config.getBoolean("chat.auto-message.enable")) {
+            addTicker(new AutoMessageTicker());
+        }
+
+        addTicker(new PlayerClearTicker());
 
         bukkitRunnableList.parallelStream().forEach(FBukkitRunnable::runTaskTimer);
     }

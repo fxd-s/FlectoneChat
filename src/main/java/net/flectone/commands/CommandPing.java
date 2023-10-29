@@ -1,53 +1,52 @@
 package net.flectone.commands;
 
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FPlayer;
 import net.flectone.managers.FPlayerManager;
-import net.flectone.custom.FTabCompleter;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FPlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.jetbrains.annotations.NotNull;
-import net.flectone.Main;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.List;
 
-public class CommandPing extends FTabCompleter {
+import static net.flectone.managers.FileManager.config;
 
-    public CommandPing(){
-        super.commandName = "ping";
-    }
+public class CommandPing implements FTabCompleter {
 
     @Override
     public boolean onCommand(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
 
-        FCommands fCommand = new FCommands(commandSender, command.getName(), s, strings);
+        if (commandSender instanceof ConsoleCommandSender && strings.length == 0) return true;
 
-        if(commandSender instanceof ConsoleCommandSender && strings.length == 0) return true;
+        FCommand fCommand = new FCommand(commandSender, command.getName(), s, strings);
 
-        FPlayer fPlayer = strings.length > 0 ? FPlayerManager.getPlayerFromName(strings[0]) : fCommand.getFPlayer();
+        FPlayer fPlayer = strings.length > 0
+                ? FPlayerManager.getPlayerFromName(strings[0])
+                : fCommand.getFPlayer();
 
-        if(fPlayer == null){
+        if (fPlayer == null || !fPlayer.isOnline() || fPlayer.getPlayer() == null) {
             fCommand.sendMeMessage("command.null-player");
             return true;
         }
 
-        if(fCommand.isHaveCD()) return true;
+        if (fCommand.isHaveCD()) return true;
 
         int currentPing = fPlayer.getPlayer().getPing();
-        int badPing = Main.config.getInt("command.ping.bad.count");
-        int mediumPing = Main.config.getInt("command.ping.medium.count");
+        int badPing = config.getInt("command.ping.bad.count");
+        int mediumPing = config.getInt("command.ping.medium.count");
         String pingColor;
 
-        if(currentPing > badPing) pingColor = Main.config.getFormatString("command.ping.bad.color", commandSender);
-        else if (currentPing > mediumPing) pingColor = Main.config.getFormatString("command.ping.medium.color", commandSender);
-        else pingColor = Main.config.getFormatString("command.ping.good.color", commandSender);
+        if (currentPing > badPing) pingColor = config.getFormatString("command.ping.bad.color", commandSender);
+        else if (currentPing > mediumPing) pingColor = config.getFormatString("command.ping.medium.color", commandSender);
+        else pingColor = config.getFormatString("command.ping.good.color", commandSender);
 
         pingColor += currentPing;
 
-        if(strings.length == 0 || commandSender == fPlayer.getPlayer()){
+        if (strings.length == 0 || commandSender == fPlayer.getPlayer()) {
             fCommand.sendMeMessage("command.ping.myself-message", "<ping>", pingColor);
             return true;
         }
@@ -65,12 +64,18 @@ public class CommandPing extends FTabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
         wordsList.clear();
 
-        if(strings.length == 1){
+        if (strings.length == 1) {
             isOnlinePlayer(strings[0]);
         }
 
         Collections.sort(wordsList);
 
         return wordsList;
+    }
+
+    @NotNull
+    @Override
+    public String getCommandName() {
+        return "ping";
     }
 }

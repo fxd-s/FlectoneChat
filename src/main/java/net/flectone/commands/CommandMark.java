@@ -1,8 +1,13 @@
 package net.flectone.commands;
 
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FTabCompleter;
-import org.bukkit.*;
+import net.flectone.Main;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FEntity;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
@@ -12,50 +17,55 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
-import net.flectone.Main;
-import net.flectone.custom.FEntity;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-public class CommandMark extends FTabCompleter {
+import static net.flectone.managers.FileManager.config;
 
-    public CommandMark(){
-        super.commandName = "mark";
-    }
+public class CommandMark implements FTabCompleter {
 
-    public static final String[] chatColorValues = {"BLACK", "DARK_BLUE", "DARK_GREEN", "DARK_AQUA", "DARK_RED", "DARK_PURPLE", "GOLD", "GRAY", "DARK_GRAY", "BLUE", "GREEN", "AQUA", "RED", "LIGHT_PURPLE", "YELLOW", "WHITE"};
+    public static final String[] chatColorValues = {
+            "BLACK",
+            "DARK_BLUE",
+            "DARK_GREEN",
+            "DARK_AQUA",
+            "DARK_RED",
+            "DARK_PURPLE",
+            "GOLD",
+            "GRAY",
+            "DARK_GRAY",
+            "BLUE",
+            "GREEN",
+            "AQUA",
+            "RED",
+            "LIGHT_PURPLE",
+            "YELLOW",
+            "WHITE"};
 
     @Override
     public boolean onCommand(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
 
-        FCommands fCommand = new FCommands(commandSender, command.getName(), s, strings);
+        FCommand fCommand = new FCommand(commandSender, command.getName(), s, strings);
 
-        if(fCommand.isConsoleMessage()) return true;
-
-        if(!Main.config.getBoolean("command.mark.enable")) {
-            fCommand.sendMeMessage( "command.disabled");
-            return true;
-        }
+        if (fCommand.isConsoleMessage()) return true;
 
         String color = (strings.length > 0) ? strings[0].toUpperCase() : "WHITE";
 
-        if(!Arrays.asList(chatColorValues).contains(color)){
+        if (!Arrays.asList(chatColorValues).contains(color)) {
             fCommand.sendMeMessage("command.mark.wrong-color");
             return true;
         }
 
-        if(fCommand.isHaveCD()) return true;
+        if (fCommand.isHaveCD() || fCommand.isMuted()) return true;
 
-        if(fCommand.isMuted()) return true;
-
-        int range = Main.config.getInt("command.mark.range");
+        int range = config.getInt("command.mark.range");
 
         Entity entity = getEntityInLineOfSightVectorMath((Player) commandSender, range);
 
-        if(entity != null && !entity.isGlowing()){
+        if (entity != null && !entity.isGlowing()) {
             entity.setGlowing(true);
 
             Bukkit.getScheduler().runTaskLater(Main.getInstance(), () -> {
@@ -81,10 +91,9 @@ public class CommandMark extends FTabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender commandSender, @NotNull Command command, @NotNull String s, @NotNull String[] strings) {
         wordsList.clear();
 
-        if(strings.length == 1){
-            for(String color : chatColorValues){
-                isStartsWith(strings[0], color);
-            }
+        if (strings.length == 1) {
+            Arrays.stream(chatColorValues).parallel()
+                    .forEach(color -> isStartsWith(strings[0], color));
         }
 
         Collections.sort(wordsList);
@@ -92,24 +101,28 @@ public class CommandMark extends FTabCompleter {
         return wordsList;
     }
 
-    private Entity getEntityInLineOfSightVectorMath(Player player, int range) {
-        RayTraceResult rayTraceResult = player.getWorld().rayTraceEntities(player.getEyeLocation(), player.getLocation().getDirection(), range, entity -> {
-            if (entity instanceof Player) {
-                return !player.equals(entity);
-            }
+    @Nullable
+    private Entity getEntityInLineOfSightVectorMath(@NotNull Player player, int range) {
+        RayTraceResult rayTraceResult = player.getWorld().rayTraceEntities(player.getEyeLocation(), player.getLocation().getDirection(), range, 0.35, entity -> {
+            // ignoring executor
+            if (player.equals(entity)) return false;
+
             return player.hasLineOfSight(entity);
         });
 
         return (rayTraceResult != null) ? rayTraceResult.getHitEntity() : null;
     }
 
-    private void spawnMarkEntity(Location location, String color) {
+    private void spawnMarkEntity(@NotNull Location location, @NotNull String color) {
         location.setX(Math.floor(location.getX()) + 0.5);
         location.setY(Math.floor(location.getY()) + 0.25);
         location.setZ(Math.floor(location.getZ()) + 0.5);
         location.setDirection(new Vector(0, 1, 0));
 
-        MagmaCube markBlockEntity = (MagmaCube) location.getWorld().spawnEntity(location, EntityType.MAGMA_CUBE);
+        World world = location.getWorld();
+        if(world == null) return;
+
+        MagmaCube markBlockEntity = (MagmaCube) world.spawnEntity(location, EntityType.MAGMA_CUBE);
 
         FEntity.addToTeam(markBlockEntity, color);
 
@@ -117,5 +130,11 @@ public class CommandMark extends FTabCompleter {
             markBlockEntity.remove();
             FEntity.removeFromTeam(markBlockEntity, color);
         }, 40);
+    }
+
+    @NotNull
+    @Override
+    public String getCommandName() {
+        return "mark";
     }
 }

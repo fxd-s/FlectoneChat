@@ -1,74 +1,97 @@
 package net.flectone.listeners;
 
 import net.flectone.Main;
-import net.flectone.custom.FCommands;
-import net.flectone.custom.FEntity;
-import net.flectone.custom.FPlayer;
-import net.flectone.custom.Mail;
 import net.flectone.managers.FPlayerManager;
+import net.flectone.misc.brand.ServerBrand;
+import net.flectone.misc.commands.FCommand;
+import net.flectone.misc.commands.FTabCompleter;
+import net.flectone.misc.entity.FEntity;
+import net.flectone.misc.entity.FPlayer;
+import net.flectone.misc.entity.player.PlayerMod;
 import net.flectone.utils.ObjectUtil;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
+import org.jetbrains.annotations.NotNull;
 
-import java.util.HashMap;
+import static net.flectone.managers.FileManager.config;
+import static net.flectone.managers.FileManager.locale;
 
 public class PlayerJoinListener implements Listener {
 
+    public static void sendJoinMessage(@NotNull Player player, boolean isOnline) {
+        boolean isEnable = config.getBoolean("player.join.message.enable");
+
+        if(!isEnable || !isOnline) return;
+
+        String string = player.hasPlayedBefore()
+                ? FPlayer.getVaultLocaleString(player, "player.join.<group>.message")
+                : locale.getString("player.join.first-time.message");
+        string = string.replace("<player>", player.getName());
+
+        FCommand fCommand = new FCommand(player, "join", "join", string.split(" "));
+
+        fCommand.sendGlobalMessage(string, "", null, true);
+    }
+
+    public static void sendJoinMessage(@NotNull Player player) {
+        FPlayer fPlayer = FPlayerManager.getPlayer(player);
+        if (fPlayer == null) return;
+        sendJoinMessage(player, true);
+    }
+
     @EventHandler
-    public void joinPlayer(PlayerJoinEvent event){
+    public void joinPlayer(@NotNull PlayerJoinEvent event) {
+        if (config.getBoolean("server.brand.enable"))
+            ServerBrand.getInstance().setBrand(event.getPlayer());
+
         Player player = event.getPlayer();
+
+        if (!player.hasPlayedBefore()) {
+            FTabCompleter.offlinePlayerList.add(player.getName());
+            FPlayerManager.getUsedFPlayers().remove(player.getName());
+        }
 
         FEntity.removeBugEntities(player);
 
-        FPlayer fPlayer = FPlayerManager.addPlayer(event.getPlayer());
-
         event.setJoinMessage(null);
-        FCommands fCommands = new FCommands(player, "join", "join", new String[]{});
 
-        String string = player.hasPlayedBefore() ? Main.locale.getString("player.join.message") : Main.locale.getString("player.join.first-time.message");
-        string = string.replace("<player>", player.getName());
+        FPlayer fPlayer = FPlayerManager.createFPlayer(event.getPlayer());
 
-        fCommands.sendGlobalMessage(string);
-
-        HashMap<String, Mail> mails = fPlayer.getMails();
-        if(mails == null) return;
-
-        mails.values().parallelStream().filter(mail -> !mail.isRemoved()).forEach(mail -> {
-
-            String playerName = FPlayerManager.getPlayer(mail.getSender()).getRealName();
-
-            String localeString = Main.locale.getFormatString("command.mail.get", player)
-                    .replace("<player>", playerName);
-
-            String newLocaleString = localeString.replace("<message>", mail.getMessage());
-            player.sendMessage(newLocaleString);
-            mail.setRemoved(true);
+        Main.getDataThreadPool().execute(() -> {
+            fPlayer.synchronizeDatabase();
+            sendJoinMessage(player, fPlayer.isOnline());
         });
     }
 
     @EventHandler
-    public void onLoginPlayer(PlayerLoginEvent event){
+    public void onLoginPlayer(@NotNull PlayerLoginEvent event) {
+        if(!event.getResult().equals(PlayerLoginEvent.Result.ALLOWED)) return;
 
-        FPlayer fPlayer = FPlayerManager.getPlayer(event.getPlayer());
-        if(fPlayer != null && (fPlayer.isPermanentlyBanned() || fPlayer.isBanned())){
-            String localString = fPlayer.isPermanentlyBanned() ? "command.ban.local-message" : "command.tempban.local-message";
-            int bannedTime = fPlayer.isPermanentlyBanned() ? -1 : fPlayer.getTempBanTime();
+        if (FPlayerManager.getBannedPlayers().contains(event.getPlayer().getName())) {
 
-            String formatMessage = Main.locale.getFormatString(localString, fPlayer.getPlayer())
-                    .replace("<time>", ObjectUtil.convertTimeToString(bannedTime))
-                    .replace("<reason>", fPlayer.getTempBanReason());
+            PlayerMod playerMod = Main.getDatabase()
+                    .getPlayerInfo("bans", "player", event.getPlayer().getUniqueId().toString());
+
+            if (playerMod == null || playerMod.isExpired()) return;
+
+            String localString = playerMod.getTime() == -1 ? "command.ban.local-message" : "command.tempban.local-message";
+
+            String formatMessage = locale.getFormatString(localString, event.getPlayer())
+                    .replace("<time>", ObjectUtil.convertTimeToString(playerMod.getDifferenceTime()))
+                    .replace("<reason>", playerMod.getReason())
+                    .replace("<moderator>", playerMod.getModeratorName());
             event.disallow(PlayerLoginEvent.Result.KICK_BANNED, formatMessage);
             return;
         }
 
-        if(Main.config.getBoolean("command.technical-works.enable")
+        if (config.getBoolean("command.maintenance.turn-on")
                 && !event.getPlayer().isOp()
-                && !event.getPlayer().hasPermission("flectonechat.technical-works")){
+                && !event.getPlayer().hasPermission("flectonechat.maintenance")) {
 
-            event.disallow(PlayerLoginEvent.Result.KICK_BANNED, Main.locale.getFormatString("command.technical-works.kicked-message", null));
+            event.disallow(PlayerLoginEvent.Result.KICK_BANNED, locale.getFormatString("command.maintenance.kicked-message", null));
         }
     }
 }

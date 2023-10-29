@@ -1,17 +1,18 @@
 package net.flectone.tickers;
 
-import net.flectone.Main;
 import net.flectone.commands.CommandAfk;
-import net.flectone.custom.FBukkitRunnable;
-import net.flectone.custom.FPlayer;
 import net.flectone.managers.FPlayerManager;
+import net.flectone.misc.entity.FPlayer;
+import net.flectone.misc.runnables.FBukkitRunnable;
 import net.flectone.utils.ObjectUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.block.Block;
 
+import static net.flectone.managers.FileManager.config;
+
 public class AfkTicker extends FBukkitRunnable {
 
-    public AfkTicker(){
+    public AfkTicker() {
         super.period = 20L;
     }
 
@@ -19,18 +20,20 @@ public class AfkTicker extends FBukkitRunnable {
     public void run() {
         Bukkit.getOnlinePlayers().parallelStream().forEach(player -> {
             FPlayer fPlayer = FPlayerManager.getPlayer(player);
+            if(fPlayer == null) return;
 
-            Block block = fPlayer.getPlayer().getLocation().getBlock();
+            Block block = player.getLocation().getBlock();
 
-            if(!fPlayer.isMoved(block)){
+            if (!fPlayer.isMoved(block)) {
 
-                boolean isEnable = Main.config.getBoolean("command.afk.timeout.enable");
-                if(fPlayer.isAfk() || !isEnable) return;
+                boolean isEnable = config.getBoolean("command.afk.timeout.enable");
+                if (fPlayer.isAfk() || !isEnable) return;
 
                 int diffTime = ObjectUtil.getCurrentTime() - fPlayer.getLastTimeMoved();
 
-                if(diffTime >= Main.config.getInt("command.afk.timeout.time")){
+                if (diffTime >= config.getInt("command.afk.timeout.time")) {
                     CommandAfk.sendMessage(fPlayer, true);
+                    fPlayer.updateName();
                 }
 
                 return;
@@ -38,9 +41,10 @@ public class AfkTicker extends FBukkitRunnable {
 
             fPlayer.setBlock(block);
 
-            if(!fPlayer.isAfk()) return;
+            if (!fPlayer.isAfk()) return;
 
             CommandAfk.sendMessage(fPlayer, false);
+            fPlayer.updateName();
         });
     }
 }
